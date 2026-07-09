@@ -50,6 +50,7 @@ if (-not $SkipDriver -and -not (Test-IsAdministrator)) {
 
 $appDir = Join-Path $InstallRoot 'app'
 $appExe = Join-Path $appDir 'MagicInput.exe'
+$clipboardReceiverScript = Join-Path $InstallRoot 'receive-mac-clipboard.ps1'
 $startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Magic Input.lnk'
 $projectPath = Join-Path $repoRoot 'src\MagicInput\MagicInput.csproj'
 $dotnetPath = Get-DotNetPath
@@ -70,6 +71,9 @@ if ($LASTEXITCODE -ne 0) {
 if (-not (Test-Path -LiteralPath $appExe)) {
     throw "Published app was not found: $appExe"
 }
+
+Write-Host 'Installing clipboard receiver helper...'
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'receive-mac-clipboard.ps1') -Destination $clipboardReceiverScript -Force
 
 Write-Host 'Creating Start Menu shortcut...'
 $shortcutDirectory = Split-Path -Parent $startMenuShortcut
@@ -108,6 +112,7 @@ if (-not $NoLaunch) {
 
 Write-Host ''
 Write-Host "Magic Input installed at: $appExe"
+Write-Host "Clipboard receiver helper: $clipboardReceiverScript"
 Write-Host "Start Menu shortcut: $startMenuShortcut"
 if ($NoStartup) {
     Write-Host 'Launch at login was not enabled because -NoStartup was used.'

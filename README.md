@@ -14,7 +14,7 @@ The trackpad driver dependency is the Microsoft-signed open-source driver from
 `vitoplantamura/MagicTrackpad2ForWindows`. Magic Input provides the local app
 surface around that driver: setup scripts, status checks, battery/status views,
 trackpad settings, keyboard media-row mapping, modifier mapping, screenshot
-shortcuts, and three-finger drag.
+shortcuts, three-finger drag, and one-way clipboard handoff from macOS.
 
 ## Project Status
 
@@ -172,6 +172,28 @@ Run key is absent, Magic Input will not start automatically after a restart.
 - Configurable bottom-left trackpad tap, defaulting to Clipboard History
   (`Win+V`). This is additive user-mode handling and does not suppress
   Windows' normal tap-to-click event.
+- Text-only Mac-to-PC clipboard handoff. Magic Input watches
+  `%APPDATA%\MagicInput\clipboard-inbox` in the logged-in desktop session and
+  imports atomically written `.clip` files into the real Windows clipboard.
+
+## Mac-to-PC Clipboard Handoff
+
+Magic Input does not expose a new network listener. The Mac remains a pure SSH
+client: it sends the current macOS clipboard to the PC over SSH, and the helper
+script writes a `.clip` inbox file for the already-running Magic Input tray app.
+
+After installing or updating Magic Input, run this from the Mac:
+
+```bash
+pbpaste | ssh <windows-user>@<pc-lan-ip> 'powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\<windows-user>\AppData\Local\Programs\MagicInput\receive-mac-clipboard.ps1"'
+```
+
+Then paste normally on Windows with `Ctrl+V`, or open `Win+V` to see the item in
+clipboard history. The handoff is text-only and capped at 4 MB to match
+Windows clipboard-history behavior.
+
+The full no-password BetterTouchTool setup is documented in
+`docs/MAC_TO_PC_CLIPBOARD_README.md`.
 
 ## Privacy And Local Data
 

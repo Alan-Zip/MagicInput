@@ -28,8 +28,40 @@ static class Program
         var initialPage = ReadArgumentValue(args, "--page") ?? "Overview";
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm(startInTray, initialPage));
+        using var mainForm = new MainForm(startInTray, initialPage);
+        using var clipboardInboxService = new ClipboardInboxService();
+        clipboardInboxService.ClipboardTextReceived += (_, e) => SetClipboardFromInbox(mainForm, e.Text);
+        clipboardInboxService.Start();
+
+        Application.Run(mainForm);
         return 0;
+    }
+
+    private static void SetClipboardFromInbox(Form mainForm, string text)
+    {
+        if (mainForm.IsDisposed)
+        {
+            return;
+        }
+
+        if (mainForm.InvokeRequired && mainForm.IsHandleCreated)
+        {
+            mainForm.BeginInvoke(() => SetClipboardText(text));
+            return;
+        }
+
+        SetClipboardText(text);
+    }
+
+    private static void SetClipboardText(string text)
+    {
+        if (text.Length == 0)
+        {
+            Clipboard.Clear();
+            return;
+        }
+
+        Clipboard.SetText(text, TextDataFormat.UnicodeText);
     }
 
     private static string? ReadArgumentValue(string[] args, string name)
