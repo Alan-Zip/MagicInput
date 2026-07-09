@@ -18,6 +18,7 @@ public sealed class KeyboardRemapper : IDisposable
     private readonly LowLevelKeyboardProc _proc;
     private readonly HashSet<Keys> _swallowedFunctionRowKeys = new();
     private readonly HashSet<Keys> _swallowedScreenshotKeys = new();
+    private readonly HashSet<Keys> _swallowedCommandDeleteKeys = new();
     private IntPtr _hookId = IntPtr.Zero;
 
     private bool _mediaRowEnabled;
@@ -121,6 +122,11 @@ public sealed class KeyboardRemapper : IDisposable
         }
 
         if (TryHandleScreenshotShortcut(key, isKeyDown, isKeyUp))
+        {
+            return (IntPtr)1;
+        }
+
+        if (_swapCommandControlEnabled && TryHandleCommandDelete(key, isKeyDown, isKeyUp))
         {
             return (IntPtr)1;
         }
@@ -248,6 +254,34 @@ public sealed class KeyboardRemapper : IDisposable
         }
 
         LogKey($"screenshot Shift+Cmd+{DescribeScreenshotDigit(action)} failed: {error}");
+        return false;
+    }
+
+    private bool TryHandleCommandDelete(Keys key, bool isKeyDown, bool isKeyUp)
+    {
+        if (key != Keys.Back)
+        {
+            return false;
+        }
+
+        if (isKeyUp)
+        {
+            return _swallowedCommandDeleteKeys.Remove(key);
+        }
+
+        if (!isKeyDown || !IsCommandShortcutModifierDown())
+        {
+            return false;
+        }
+
+        if (SendCommandDeleteAction(out var error))
+        {
+            _swallowedCommandDeleteKeys.Add(key);
+            LogKey("Cmd+Delete -> Delete");
+            return true;
+        }
+
+        LogKey($"Cmd+Delete failed: {error}");
         return false;
     }
 
@@ -397,6 +431,20 @@ public sealed class KeyboardRemapper : IDisposable
         finally
         {
             RestorePhysicalShiftKeys(releasedShifts);
+            RestoreActiveCommandControls(releasedControls);
+        }
+    }
+
+    private bool SendCommandDeleteAction(out string error)
+    {
+        var releasedControls = ReleaseActiveCommandControls();
+
+        try
+        {
+            return SendKeyPress((ushort)Keys.Delete, out error);
+        }
+        finally
+        {
             RestoreActiveCommandControls(releasedControls);
         }
     }
@@ -614,7 +662,7 @@ public sealed class KeyboardRemapper : IDisposable
 
     private static bool IsExtendedKey(ushort virtualKey)
     {
-        return virtualKey is 0x5B or 0x5C or 0xA3 or 0xAD or 0xAE or 0xAF or 0xB0 or 0xB1 or 0xB3;
+        return virtualKey is 0x2E or 0x5B or 0x5C or 0xA3 or 0xAD or 0xAE or 0xAF or 0xB0 or 0xB1 or 0xB3;
     }
 
     private static bool IsDiagnosticKey(Keys key, uint scanCode)
@@ -634,6 +682,8 @@ public sealed class KeyboardRemapper : IDisposable
             or Keys.RControlKey
             or Keys.ControlKey
             or Keys.Space
+            or Keys.Back
+            or Keys.Delete
             or Keys.VolumeMute
             or Keys.VolumeDown
             or Keys.VolumeUp
@@ -829,6 +879,7 @@ public sealed class KeyboardRemapper : IDisposable
 
         _swallowedFunctionRowKeys.Clear();
         _swallowedScreenshotKeys.Clear();
+        _swallowedCommandDeleteKeys.Clear();
     }
 
     private void ReleaseCommandSide(Keys key)

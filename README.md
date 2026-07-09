@@ -161,6 +161,8 @@ Run key is absent, Magic Input will not start automatically after a restart.
   - physical Command -> Windows Control
   - physical Control -> Windows key
   - `Command+Space` remains input-language switching
+  - `Command+Delete` sends forward Delete while the plain Apple Delete key
+    remains Backspace
 - macOS-style screenshot shortcuts:
   - `Shift+Command+3` -> full-screen screenshot
   - `Shift+Command+4` -> area snip
