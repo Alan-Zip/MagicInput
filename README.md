@@ -71,8 +71,9 @@ That script does all of this:
 2. Publishes the app to `%LOCALAPPDATA%\Programs\MagicInput\app`.
 3. Downloads and verifies the pinned Magic Trackpad driver package if needed.
 4. Installs the driver with `pnputil`.
-5. Registers Magic Input to launch at login for the current Windows user.
-6. Launches Magic Input in tray mode.
+5. Creates a `Magic Input` shortcut in the current user's Start Menu.
+6. Registers Magic Input to launch at login for the current Windows user.
+7. Launches Magic Input in tray mode.
 
 Useful install options:
 

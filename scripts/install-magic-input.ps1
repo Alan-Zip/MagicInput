@@ -50,6 +50,7 @@ if (-not $SkipDriver -and -not (Test-IsAdministrator)) {
 
 $appDir = Join-Path $InstallRoot 'app'
 $appExe = Join-Path $appDir 'MagicInput.exe'
+$startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Magic Input.lnk'
 $projectPath = Join-Path $repoRoot 'src\MagicInput\MagicInput.csproj'
 $dotnetPath = Get-DotNetPath
 
@@ -69,6 +70,18 @@ if ($LASTEXITCODE -ne 0) {
 if (-not (Test-Path -LiteralPath $appExe)) {
     throw "Published app was not found: $appExe"
 }
+
+Write-Host 'Creating Start Menu shortcut...'
+$shortcutDirectory = Split-Path -Parent $startMenuShortcut
+New-Item -ItemType Directory -Force -Path $shortcutDirectory | Out-Null
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($startMenuShortcut)
+$shortcut.TargetPath = $appExe
+$shortcut.Arguments = ''
+$shortcut.WorkingDirectory = $appDir
+$shortcut.IconLocation = $appExe
+$shortcut.Description = 'Magic Input'
+$shortcut.Save()
 
 if (-not $SkipDriver) {
     Write-Host 'Installing Magic Trackpad dependency driver...'
@@ -95,6 +108,7 @@ if (-not $NoLaunch) {
 
 Write-Host ''
 Write-Host "Magic Input installed at: $appExe"
+Write-Host "Start Menu shortcut: $startMenuShortcut"
 if ($NoStartup) {
     Write-Host 'Launch at login was not enabled because -NoStartup was used.'
 }
