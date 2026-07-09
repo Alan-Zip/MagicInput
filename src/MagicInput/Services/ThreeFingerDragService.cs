@@ -10,13 +10,15 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
 {
     private const int WmInput = 0x00FF;
     private const int WmInputDeviceChange = 0x00FE;
-    private const int ReleaseAfterNoContactsMs = 450;
+    private const int DragReleaseAfterNoContactsMs = 450;
+    private const int TapReleaseAfterNoContactsMs = 95;
     private const int ReleaseGapMs = 90;
 
     private readonly TouchpadContactManager _contactManager;
     private readonly ThreeFingerDragRecognizer _dragRecognizer = new();
     private readonly BottomLeftTapRecognizer _bottomLeftTapRecognizer = new();
-    private readonly System.Windows.Forms.Timer _releaseTimer = new();
+    private readonly System.Windows.Forms.Timer _dragReleaseTimer = new();
+    private readonly System.Windows.Forms.Timer _tapReleaseTimer = new();
 
     private TouchpadContact[] _previousContacts = [];
     private long _lastContactAt = Environment.TickCount64;
@@ -24,15 +26,25 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
     private bool _registered;
     private bool _threeFingerDragEnabled;
     private CornerTapAction _bottomLeftTapAction = CornerTapAction.Off;
+    private TouchpadBounds _lastBounds;
 
     public ThreeFingerDragService()
     {
         _contactManager = new TouchpadContactManager(OnTouchpadContacts);
-        _releaseTimer.Interval = ReleaseAfterNoContactsMs;
-        _releaseTimer.Tick += (_, _) =>
+        _dragReleaseTimer.Interval = DragReleaseAfterNoContactsMs;
+        _dragReleaseTimer.Tick += (_, _) =>
         {
-            _releaseTimer.Stop();
+            _dragReleaseTimer.Stop();
             _dragRecognizer.Release();
+            _previousContacts = [];
+        };
+
+        _tapReleaseTimer.Interval = TapReleaseAfterNoContactsMs;
+        _tapReleaseTimer.Tick += (_, _) =>
+        {
+            _tapReleaseTimer.Stop();
+            _bottomLeftTapRecognizer.CompletePending(_lastBounds);
+            _bottomLeftTapRecognizer.Reset();
         };
     }
 
@@ -59,7 +71,8 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
     public void Dispose()
     {
         Stop();
-        _releaseTimer.Dispose();
+        _dragReleaseTimer.Dispose();
+        _tapReleaseTimer.Dispose();
         if (Handle != IntPtr.Zero)
         {
             DestroyHandle();
@@ -109,7 +122,8 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
     {
         _enabled = false;
         _registered = false;
-        _releaseTimer.Stop();
+        _dragReleaseTimer.Stop();
+        _tapReleaseTimer.Stop();
         _dragRecognizer.Release();
         _bottomLeftTapRecognizer.Reset();
         _previousContacts = [];
@@ -130,6 +144,11 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
 
     private void OnTouchpadContacts(IntPtr device, IReadOnlyList<TouchpadContact> contacts, TouchpadBounds bounds)
     {
+        if (bounds.IsValid)
+        {
+            _lastBounds = bounds;
+        }
+
         var now = Environment.TickCount64;
         var elapsed = Math.Clamp(now - _lastContactAt, 0, int.MaxValue);
         _lastContactAt = now;
@@ -138,12 +157,15 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         {
             _bottomLeftTapRecognizer.OnContacts(_previousContacts, [], bounds);
             _previousContacts = [];
-            _releaseTimer.Stop();
-            _releaseTimer.Start();
+            _dragReleaseTimer.Stop();
+            _dragReleaseTimer.Start();
+            _tapReleaseTimer.Stop();
+            _tapReleaseTimer.Start();
             return;
         }
 
-        _releaseTimer.Stop();
+        _dragReleaseTimer.Stop();
+        _tapReleaseTimer.Stop();
 
         if (elapsed > ReleaseGapMs)
         {
@@ -156,6 +178,8 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         _bottomLeftTapRecognizer.OnContacts(_previousContacts, currentContacts, bounds);
         _dragRecognizer.OnContacts(_previousContacts, currentContacts, (int)elapsed);
         _previousContacts = currentContacts;
+        _dragReleaseTimer.Start();
+        _tapReleaseTimer.Start();
     }
 
     private string ActiveStatus()
@@ -413,7 +437,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         private const float CornerWidthRatio = 0.24f;
         private const float CornerHeightRatio = 0.24f;
         private const float MaxMoveRatio = 0.045f;
-        private const int MaxTapMs = 420;
+        private const int MaxTapMs = 800;
         private const int CooldownMs = 300;
 
         private CornerTapAction _action = CornerTapAction.Off;
@@ -499,6 +523,11 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             _lastX = 0;
             _lastY = 0;
             _startedAt = 0;
+        }
+
+        public void CompletePending(TouchpadBounds bounds)
+        {
+            CompleteIfTap(bounds);
         }
 
         private void CompleteIfTap(TouchpadBounds bounds)
@@ -1133,10 +1162,13 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             var input = new Input
             {
                 Type = InputKeyboard,
-                Keyboard = new KeyboardInputData
+                Union = new InputUnion
                 {
-                    VirtualKey = virtualKey,
-                    Flags = (IsExtendedKey(virtualKey) ? KeyEventFExtendedKey : 0) | (keyUp ? KeyEventFKeyUp : 0)
+                    Keyboard = new KeyboardInputData
+                    {
+                        VirtualKey = virtualKey,
+                        Flags = (IsExtendedKey(virtualKey) ? KeyEventFExtendedKey : 0) | (keyUp ? KeyEventFKeyUp : 0)
+                    }
                 }
             };
 
@@ -1161,7 +1193,17 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         private struct Input
         {
             public int Type;
+            public InputUnion Union;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct InputUnion
+        {
+            [FieldOffset(0)]
             public KeyboardInputData Keyboard;
+
+            [FieldOffset(0)]
+            public MouseInputDataForSize Mouse;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -1170,6 +1212,17 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             public ushort VirtualKey;
             public ushort ScanCode;
             public uint Flags;
+            public int Time;
+            public IntPtr ExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MouseInputDataForSize
+        {
+            public int Dx;
+            public int Dy;
+            public int MouseData;
+            public int Flags;
             public int Time;
             public IntPtr ExtraInfo;
         }
