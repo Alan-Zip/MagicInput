@@ -1,0 +1,40 @@
+# Build output
+bin/
+obj/
+src/**/bin/
+src/**/obj/
+
+# User-local IDE/editor state
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Runtime logs and generated diagnostics
+logs/
+state/
+*.log
+
+# Downloaded/extracted third-party driver packages
+downloads/
+packages/
+
+# Local publish/install output
+publish/
+install/
+
+# Local secrets and signing material
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.p12
+*.snk
+secrets.*
+
+# OS noise
+Thumbs.db
+Desktop.ini
