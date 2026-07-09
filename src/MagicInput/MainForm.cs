@@ -43,6 +43,7 @@ public sealed class MainForm : Form
     private CheckBox _ignoreNearFingers = null!;
     private CheckBox _palmRejection = null!;
     private CheckBox _threeFingerDrag = null!;
+    private ComboBox _bottomLeftTapAction = null!;
     private Label _threeFingerDragStatus = null!;
     private CheckBox _mediaRow = null!;
     private CheckBox _commandControlSwap = null!;
@@ -268,6 +269,20 @@ public sealed class MainForm : Form
             AppSettingsStore.Save(_appSettings);
             ApplyThreeFingerDragState();
         };
+        _bottomLeftTapAction = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 280,
+            Height = 34,
+            ForeColor = Palette.Text
+        };
+        _bottomLeftTapAction.Items.AddRange(CornerTapActionOptions().Cast<object>().ToArray());
+        _bottomLeftTapAction.SelectedIndexChanged += (_, _) =>
+        {
+            _appSettings.BottomLeftTapAction = SelectedBottomLeftTapAction();
+            AppSettingsStore.Save(_appSettings);
+            ApplyThreeFingerDragState();
+        };
         _threeFingerDragStatus = LabelText("Three-finger drag is off.");
 
         settings.Controls.Add(Stack(
@@ -287,6 +302,8 @@ public sealed class MainForm : Form
             _palmRejection,
             Separator(),
             _threeFingerDrag,
+            LabelText("Bottom-left tap"),
+            _bottomLeftTapAction,
             _threeFingerDragStatus,
             ActionButton("Apply trackpad settings", (_, _) => ApplyTrackpadSettings())));
 
@@ -444,6 +461,7 @@ public sealed class MainForm : Form
         _mediaRow.Checked = _appSettings.MediaRowMapperEnabled;
         _commandControlSwap.Checked = _appSettings.SwapCommandControlEnabled;
         _threeFingerDrag.Checked = _appSettings.ThreeFingerDragEnabled;
+        SelectBottomLeftTapAction(_appSettings.BottomLeftTapAction);
         _launchAtLogin.Checked = _appSettings.LaunchAtLogin;
         ApplyKeyboardMapperState();
         ApplyThreeFingerDragState();
@@ -657,11 +675,42 @@ public sealed class MainForm : Form
 
     private void ApplyThreeFingerDragState()
     {
-        _threeFingerDragService.Configure(_appSettings.ThreeFingerDragEnabled);
+        _threeFingerDragService.Configure(_appSettings.ThreeFingerDragEnabled, _appSettings.BottomLeftTapAction);
         if (_threeFingerDragStatus != null)
         {
             _threeFingerDragStatus.Text = _threeFingerDragService.Status;
         }
+    }
+
+    private CornerTapAction SelectedBottomLeftTapAction()
+    {
+        return _bottomLeftTapAction.SelectedItem is CornerTapActionOption option
+            ? option.Action
+            : CornerTapAction.Off;
+    }
+
+    private void SelectBottomLeftTapAction(CornerTapAction action)
+    {
+        for (var index = 0; index < _bottomLeftTapAction.Items.Count; index++)
+        {
+            if (_bottomLeftTapAction.Items[index] is CornerTapActionOption option && option.Action == action)
+            {
+                _bottomLeftTapAction.SelectedIndex = index;
+                return;
+            }
+        }
+
+        _bottomLeftTapAction.SelectedIndex = 0;
+    }
+
+    private static IEnumerable<CornerTapActionOption> CornerTapActionOptions()
+    {
+        yield return new CornerTapActionOption("Off", CornerTapAction.Off);
+        yield return new CornerTapActionOption("Clipboard history (Win+V)", CornerTapAction.ClipboardHistory);
+        yield return new CornerTapActionOption("Start menu", CornerTapAction.StartMenu);
+        yield return new CornerTapActionOption("Task View", CornerTapAction.TaskView);
+        yield return new CornerTapActionOption("Show Desktop", CornerTapAction.ShowDesktop);
+        yield return new CornerTapActionOption("Previous window", CornerTapAction.PreviousWindow);
     }
 
     private static Button NavButton(string text) => new()
@@ -954,6 +1003,20 @@ public sealed class MainForm : Form
         BackColor = Palette.Border,
         Margin = new Padding(0, 8, 0, 14)
     };
+
+    private sealed class CornerTapActionOption
+    {
+        public CornerTapActionOption(string label, CornerTapAction action)
+        {
+            Label = label;
+            Action = action;
+        }
+
+        public string Label { get; }
+        public CornerTapAction Action { get; }
+
+        public override string ToString() => Label;
+    }
 
     private sealed class VerticalScrollPanel : Panel
     {

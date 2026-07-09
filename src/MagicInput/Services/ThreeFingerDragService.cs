@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using MagicInput.Models;
 using Microsoft.Win32;
 
 namespace MagicInput.Services;
@@ -13,13 +14,16 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
     private const int ReleaseGapMs = 90;
 
     private readonly TouchpadContactManager _contactManager;
-    private readonly ThreeFingerDragRecognizer _recognizer = new();
+    private readonly ThreeFingerDragRecognizer _dragRecognizer = new();
+    private readonly BottomLeftTapRecognizer _bottomLeftTapRecognizer = new();
     private readonly System.Windows.Forms.Timer _releaseTimer = new();
 
     private TouchpadContact[] _previousContacts = [];
     private long _lastContactAt = Environment.TickCount64;
     private bool _enabled;
     private bool _registered;
+    private bool _threeFingerDragEnabled;
+    private CornerTapAction _bottomLeftTapAction = CornerTapAction.Off;
 
     public ThreeFingerDragService()
     {
@@ -28,17 +32,22 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         _releaseTimer.Tick += (_, _) =>
         {
             _releaseTimer.Stop();
-            _recognizer.Release();
+            _dragRecognizer.Release();
         };
     }
 
-    public string Status { get; private set; } = "Three-finger drag is off.";
+    public string Status { get; private set; } = "Touchpad gestures are off.";
 
     public bool IsActive => _enabled && _registered;
 
-    public void Configure(bool enabled)
+    public void Configure(bool threeFingerDragEnabled, CornerTapAction bottomLeftTapAction)
     {
-        if (enabled)
+        _threeFingerDragEnabled = threeFingerDragEnabled;
+        _bottomLeftTapAction = bottomLeftTapAction;
+        _dragRecognizer.Enabled = threeFingerDragEnabled;
+        _bottomLeftTapRecognizer.Configure(bottomLeftTapAction);
+
+        if (threeFingerDragEnabled || bottomLeftTapAction != CornerTapAction.Off)
         {
             Start();
             return;
@@ -64,13 +73,13 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             var report = RawTouchpadInput.ParseInput(m.LParam);
             if (report != null)
             {
-                _contactManager.Receive(report.Value.Device, report.Value.Contacts, report.Value.ContactCount);
+                _contactManager.Receive(report.Value.Device, report.Value.Contacts, report.Value.ContactCount, report.Value.Bounds);
             }
         }
         else if (_enabled && m.Msg == WmInputDeviceChange)
         {
             Status = RawTouchpadInput.TouchpadExists()
-                ? "Three-finger drag is active."
+                ? ActiveStatus()
                 : "No Precision Touchpad raw input device found.";
         }
 
@@ -81,14 +90,17 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
     {
         _enabled = true;
         EnsureHandle();
-        PrecisionTouchpadGestureSettings.ReserveThreeFingerGesturesForDrag();
+        if (_threeFingerDragEnabled)
+        {
+            PrecisionTouchpadGestureSettings.ReserveThreeFingerGesturesForDrag();
+        }
 
         var touchpadExists = RawTouchpadInput.TouchpadExists();
         _registered = RawTouchpadInput.RegisterInput(Handle);
         Status = touchpadExists
             ? _registered
-                ? "Three-finger drag is active."
-                : $"Three-finger drag could not register raw input. Win32 error {Marshal.GetLastWin32Error()}."
+                ? ActiveStatus()
+                : $"Touchpad gestures could not register raw input. Win32 error {Marshal.GetLastWin32Error()}."
             : "No Precision Touchpad raw input device found.";
         Log(Status);
     }
@@ -98,10 +110,11 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         _enabled = false;
         _registered = false;
         _releaseTimer.Stop();
-        _recognizer.Release();
+        _dragRecognizer.Release();
+        _bottomLeftTapRecognizer.Reset();
         _previousContacts = [];
         RawTouchpadInput.UnregisterInput();
-        Status = "Three-finger drag is off.";
+        Status = "Touchpad gestures are off.";
         Log(Status);
     }
 
@@ -115,7 +128,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         CreateHandle(new CreateParams { Caption = "MagicInputThreeFingerDragSink" });
     }
 
-    private void OnTouchpadContacts(IntPtr device, IReadOnlyList<TouchpadContact> contacts)
+    private void OnTouchpadContacts(IntPtr device, IReadOnlyList<TouchpadContact> contacts, TouchpadBounds bounds)
     {
         var now = Environment.TickCount64;
         var elapsed = Math.Clamp(now - _lastContactAt, 0, int.MaxValue);
@@ -123,6 +136,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
 
         if (contacts.Count == 0)
         {
+            _bottomLeftTapRecognizer.OnContacts(_previousContacts, [], bounds);
             _previousContacts = [];
             _releaseTimer.Stop();
             _releaseTimer.Start();
@@ -134,11 +148,25 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         if (elapsed > ReleaseGapMs)
         {
             _previousContacts = [];
-            _recognizer.ResetGestureTracking();
+            _dragRecognizer.ResetGestureTracking();
+            _bottomLeftTapRecognizer.Reset();
         }
 
-        _recognizer.OnContacts(_previousContacts, contacts.ToArray(), (int)elapsed);
-        _previousContacts = contacts.ToArray();
+        var currentContacts = contacts.ToArray();
+        _bottomLeftTapRecognizer.OnContacts(_previousContacts, currentContacts, bounds);
+        _dragRecognizer.OnContacts(_previousContacts, currentContacts, (int)elapsed);
+        _previousContacts = currentContacts;
+    }
+
+    private string ActiveStatus()
+    {
+        return (_threeFingerDragEnabled, _bottomLeftTapAction != CornerTapAction.Off) switch
+        {
+            (true, true) => "Three-finger drag and bottom-left tap are active.",
+            (true, false) => "Three-finger drag is active.",
+            (false, true) => "Bottom-left tap is active.",
+            _ => "Touchpad gestures are off."
+        };
     }
 
     private static void Log(string message)
@@ -157,36 +185,38 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
 
     private readonly struct RawTouchpadReport
     {
-        public RawTouchpadReport(IntPtr device, List<TouchpadContact> contacts, uint contactCount)
+        public RawTouchpadReport(IntPtr device, List<TouchpadContact> contacts, uint contactCount, TouchpadBounds bounds)
         {
             Device = device;
             Contacts = contacts;
             ContactCount = contactCount;
+            Bounds = bounds;
         }
 
         public IntPtr Device { get; }
         public List<TouchpadContact> Contacts { get; }
         public uint ContactCount { get; }
+        public TouchpadBounds Bounds { get; }
     }
 
     private sealed class TouchpadContactManager
     {
-        private readonly Action<IntPtr, IReadOnlyList<TouchpadContact>> _onContacts;
+        private readonly Action<IntPtr, IReadOnlyList<TouchpadContact>, TouchpadBounds> _onContacts;
         private readonly List<TouchpadContact> _pendingContacts = new();
         private uint _targetContactCount;
 
-        public TouchpadContactManager(Action<IntPtr, IReadOnlyList<TouchpadContact>> onContacts)
+        public TouchpadContactManager(Action<IntPtr, IReadOnlyList<TouchpadContact>, TouchpadBounds> onContacts)
         {
             _onContacts = onContacts;
         }
 
-        public void Receive(IntPtr device, List<TouchpadContact> contacts, uint contactCount)
+        public void Receive(IntPtr device, List<TouchpadContact> contacts, uint contactCount, TouchpadBounds bounds)
         {
             if (contactCount == 0 && contacts.Count == 0)
             {
                 _pendingContacts.Clear();
                 _targetContactCount = 0;
-                _onContacts(device, []);
+                _onContacts(device, [], bounds);
                 return;
             }
 
@@ -199,7 +229,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             {
                 _pendingContacts.Clear();
                 _targetContactCount = 0;
-                _onContacts(device, contacts);
+                _onContacts(device, contacts, bounds);
                 return;
             }
 
@@ -212,7 +242,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
                     var completed = _pendingContacts.Take((int)_targetContactCount).ToArray();
                     _pendingContacts.Clear();
                     _targetContactCount = 0;
-                    _onContacts(device, completed);
+                    _onContacts(device, completed, bounds);
                 }
 
                 return;
@@ -248,8 +278,17 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         private float _carryX;
         private float _carryY;
 
+        public bool Enabled { get; set; }
+
         public void OnContacts(TouchpadContact[] previousContacts, TouchpadContact[] contacts, int elapsedMs)
         {
+            if (!Enabled)
+            {
+                Release();
+                ResetGestureTracking();
+                return;
+            }
+
             if (contacts.Length < 2)
             {
                 Release();
@@ -366,6 +405,173 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             }
 
             return (x / contacts.Count, y / contacts.Count);
+        }
+    }
+
+    private sealed class BottomLeftTapRecognizer
+    {
+        private const float CornerWidthRatio = 0.24f;
+        private const float CornerHeightRatio = 0.24f;
+        private const float MaxMoveRatio = 0.045f;
+        private const int MaxTapMs = 420;
+        private const int CooldownMs = 300;
+
+        private CornerTapAction _action = CornerTapAction.Off;
+        private bool _tracking;
+        private bool _blocked;
+        private int _contactId;
+        private int _startX;
+        private int _startY;
+        private int _lastX;
+        private int _lastY;
+        private long _startedAt;
+        private long _lastTriggeredAt;
+
+        public void Configure(CornerTapAction action)
+        {
+            _action = action;
+            if (action == CornerTapAction.Off)
+            {
+                Reset();
+            }
+        }
+
+        public void OnContacts(TouchpadContact[] previousContacts, TouchpadContact[] contacts, TouchpadBounds bounds)
+        {
+            if (_action == CornerTapAction.Off || !bounds.IsValid)
+            {
+                Reset();
+                return;
+            }
+
+            if (contacts.Length == 0)
+            {
+                CompleteIfTap(bounds);
+                Reset();
+                return;
+            }
+
+            if (contacts.Length != 1)
+            {
+                if (_tracking)
+                {
+                    _blocked = true;
+                }
+
+                return;
+            }
+
+            var contact = contacts[0];
+            if (!_tracking)
+            {
+                _tracking = true;
+                _blocked = !bounds.IsBottomLeft(contact, CornerWidthRatio, CornerHeightRatio);
+                _contactId = contact.ContactId;
+                _startX = contact.X;
+                _startY = contact.Y;
+                _lastX = contact.X;
+                _lastY = contact.Y;
+                _startedAt = Environment.TickCount64;
+                return;
+            }
+
+            if (contact.ContactId != _contactId)
+            {
+                _blocked = true;
+                return;
+            }
+
+            _lastX = contact.X;
+            _lastY = contact.Y;
+            if (!bounds.IsBottomLeft(contact, CornerWidthRatio, CornerHeightRatio) || MovedTooFar(bounds))
+            {
+                _blocked = true;
+            }
+        }
+
+        public void Reset()
+        {
+            _tracking = false;
+            _blocked = false;
+            _contactId = 0;
+            _startX = 0;
+            _startY = 0;
+            _lastX = 0;
+            _lastY = 0;
+            _startedAt = 0;
+        }
+
+        private void CompleteIfTap(TouchpadBounds bounds)
+        {
+            if (!_tracking || _blocked)
+            {
+                return;
+            }
+
+            var now = Environment.TickCount64;
+            if (now - _startedAt > MaxTapMs || now - _lastTriggeredAt < CooldownMs || MovedTooFar(bounds))
+            {
+                return;
+            }
+
+            if (KeyboardActionInput.Send(_action))
+            {
+                _lastTriggeredAt = now;
+                Log($"bottom-left tap -> {DescribeAction(_action)}");
+            }
+        }
+
+        private bool MovedTooFar(TouchpadBounds bounds)
+        {
+            var dx = _lastX - _startX;
+            var dy = _lastY - _startY;
+            var distance = MathF.Sqrt(dx * dx + dy * dy);
+            var diagonal = MathF.Sqrt(bounds.Width * bounds.Width + bounds.Height * bounds.Height);
+            return diagonal > 0 && distance > diagonal * MaxMoveRatio;
+        }
+
+        private static string DescribeAction(CornerTapAction action)
+        {
+            return action switch
+            {
+                CornerTapAction.ClipboardHistory => "Win+V",
+                CornerTapAction.StartMenu => "Win",
+                CornerTapAction.TaskView => "Win+Tab",
+                CornerTapAction.ShowDesktop => "Win+D",
+                CornerTapAction.PreviousWindow => "Alt+Tab",
+                _ => "off"
+            };
+        }
+    }
+
+    private readonly struct TouchpadBounds
+    {
+        public TouchpadBounds(int minX, int maxX, int minY, int maxY)
+        {
+            MinX = minX;
+            MaxX = maxX;
+            MinY = minY;
+            MaxY = maxY;
+        }
+
+        public int MinX { get; }
+        public int MaxX { get; }
+        public int MinY { get; }
+        public int MaxY { get; }
+        public bool IsValid => MaxX > MinX && MaxY > MinY;
+        public int Width => MaxX - MinX;
+        public int Height => MaxY - MinY;
+
+        public bool IsBottomLeft(TouchpadContact contact, float widthRatio, float heightRatio)
+        {
+            if (!IsValid)
+            {
+                return false;
+            }
+
+            var leftLimit = MinX + Width * widthRatio;
+            var bottomLimit = MaxY - Height * heightRatio;
+            return contact.X <= leftLimit && contact.Y >= bottomLimit;
         }
     }
 
@@ -559,11 +765,26 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
                 }
 
                 uint contactCount = 99;
+                int? minX = null;
+                int? maxX = null;
+                int? minY = null;
+                int? maxY = null;
                 var builders = new List<TouchpadContactBuilder>();
                 var contacts = new List<TouchpadContact>();
 
                 foreach (var valueCap in valueCaps.Take(valueCapsLength).OrderBy(cap => cap.LinkCollection))
                 {
+                    if (valueCap.UsagePage == 0x01 && valueCap.Usage == 0x30)
+                    {
+                        minX = valueCap.LogicalMin;
+                        maxX = valueCap.LogicalMax;
+                    }
+                    else if (valueCap.UsagePage == 0x01 && valueCap.Usage == 0x31)
+                    {
+                        minY = valueCap.LogicalMin;
+                        maxY = valueCap.LogicalMax;
+                    }
+
                     for (var contactIndex = 0; contactIndex < reportCount; contactIndex++)
                     {
                         var reportPointer = IntPtr.Add(rawHidDataPointer, (int)(reportSize * contactIndex));
@@ -625,7 +846,10 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
                     }
                 }
 
-                return new RawTouchpadReport(device, contacts, contactCount);
+                var bounds = minX.HasValue && maxX.HasValue && minY.HasValue && maxY.HasValue
+                    ? new TouchpadBounds(minX.Value, maxX.Value, minY.Value, maxY.Value)
+                    : default;
+                return new RawTouchpadReport(device, contacts, contactCount, bounds);
             }
             finally
             {
@@ -845,6 +1069,109 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             public ushort DataIndexMax;
 
             public ushort Usage => UsageMin;
+        }
+    }
+
+    private static class KeyboardActionInput
+    {
+        private const int InputKeyboard = 1;
+        private const uint KeyEventFExtendedKey = 0x0001;
+        private const uint KeyEventFKeyUp = 0x0002;
+
+        public static bool Send(CornerTapAction action)
+        {
+            return action switch
+            {
+                CornerTapAction.ClipboardHistory => SendChord([(ushort)Keys.LWin], (ushort)Keys.V),
+                CornerTapAction.StartMenu => SendKeyPress((ushort)Keys.LWin),
+                CornerTapAction.TaskView => SendChord([(ushort)Keys.LWin], (ushort)Keys.Tab),
+                CornerTapAction.ShowDesktop => SendChord([(ushort)Keys.LWin], (ushort)Keys.D),
+                CornerTapAction.PreviousWindow => SendChord([(ushort)Keys.Menu], (ushort)Keys.Tab),
+                _ => false
+            };
+        }
+
+        private static bool SendKeyPress(ushort virtualKey)
+        {
+            return SendKey(virtualKey, false) && SendKey(virtualKey, true);
+        }
+
+        private static bool SendChord(IReadOnlyList<ushort> modifierKeys, ushort key)
+        {
+            var pressedModifiers = new List<ushort>();
+            foreach (var modifierKey in modifierKeys)
+            {
+                if (!SendKey(modifierKey, false))
+                {
+                    ReleaseKeys(pressedModifiers);
+                    return false;
+                }
+
+                pressedModifiers.Add(modifierKey);
+            }
+
+            if (!SendKey(key, false) || !SendKey(key, true))
+            {
+                ReleaseKeys(pressedModifiers);
+                return false;
+            }
+
+            ReleaseKeys(pressedModifiers);
+            return true;
+        }
+
+        private static void ReleaseKeys(IEnumerable<ushort> keys)
+        {
+            foreach (var key in keys.Reverse())
+            {
+                SendKey(key, true);
+            }
+        }
+
+        private static bool SendKey(ushort virtualKey, bool keyUp)
+        {
+            var input = new Input
+            {
+                Type = InputKeyboard,
+                Keyboard = new KeyboardInputData
+                {
+                    VirtualKey = virtualKey,
+                    Flags = (IsExtendedKey(virtualKey) ? KeyEventFExtendedKey : 0) | (keyUp ? KeyEventFKeyUp : 0)
+                }
+            };
+
+            var ok = SendInput(1, [input], Marshal.SizeOf<Input>()) == 1;
+            if (!ok)
+            {
+                Log($"SendInput keyboard failed. Win32 error {Marshal.GetLastWin32Error()}.");
+            }
+
+            return ok;
+        }
+
+        private static bool IsExtendedKey(ushort virtualKey)
+        {
+            return virtualKey is 0x5B or 0x5C;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(uint inputs, Input[] input, int size);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Input
+        {
+            public int Type;
+            public KeyboardInputData Keyboard;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KeyboardInputData
+        {
+            public ushort VirtualKey;
+            public ushort ScanCode;
+            public uint Flags;
+            public int Time;
+            public IntPtr ExtraInfo;
         }
     }
 

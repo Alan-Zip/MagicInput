@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using MagicInput.Models;
 using Microsoft.Win32;
 
@@ -13,6 +14,12 @@ public static class AppSettingsStore
 
     private static readonly string SettingsPath = Path.Combine(SettingsDirectory, "settings.json");
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     public static AppSettings Load()
     {
         try
@@ -22,7 +29,7 @@ public static class AppSettingsStore
                 return new AppSettings { LaunchAtLogin = IsStartupEnabled() };
             }
 
-            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath)) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath), JsonOptions) ?? new AppSettings();
             settings.LaunchAtLogin = IsStartupEnabled();
             return settings;
         }
@@ -35,7 +42,7 @@ public static class AppSettingsStore
     public static void Save(AppSettings settings)
     {
         Directory.CreateDirectory(SettingsDirectory);
-        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
         SetStartup(settings.LaunchAtLogin);
     }
 

@@ -168,6 +168,9 @@ Run key is absent, Magic Input will not start automatically after a restart.
   - `Shift+Command+4` -> area snip
   - `Shift+Command+5` -> Snipping Tool
 - Three-finger drag through Precision Touchpad raw input.
+- Configurable bottom-left trackpad tap, defaulting to Clipboard History
+  (`Win+V`). This is additive user-mode handling and does not suppress
+  Windows' normal tap-to-click event.
 
 ## Privacy And Local Data
 
