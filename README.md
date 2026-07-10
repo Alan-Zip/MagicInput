@@ -164,6 +164,7 @@ Run key is absent, Magic Input will not start automatically after a restart.
   - `Command+Space` remains input-language switching
   - `Command+Delete` sends forward Delete while the plain Apple Delete key
     remains Backspace
+  - `Command+I` opens Properties for the selected file (`Alt+Enter`)
 - macOS-style screenshot shortcuts:
   - `Shift+Command+3` -> full-screen screenshot
   - `Shift+Command+4` -> area snip

@@ -19,6 +19,7 @@ public sealed class KeyboardRemapper : IDisposable
     private readonly HashSet<Keys> _swallowedFunctionRowKeys = new();
     private readonly HashSet<Keys> _swallowedScreenshotKeys = new();
     private readonly HashSet<Keys> _swallowedCommandDeleteKeys = new();
+    private readonly HashSet<Keys> _swallowedCommandInfoKeys = new();
     private IntPtr _hookId = IntPtr.Zero;
 
     private bool _mediaRowEnabled;
@@ -127,6 +128,11 @@ public sealed class KeyboardRemapper : IDisposable
         }
 
         if (_swapCommandControlEnabled && TryHandleCommandDelete(key, isKeyDown, isKeyUp))
+        {
+            return (IntPtr)1;
+        }
+
+        if (_swapCommandControlEnabled && TryHandleCommandInfo(key, isKeyDown, isKeyUp))
         {
             return (IntPtr)1;
         }
@@ -282,6 +288,34 @@ public sealed class KeyboardRemapper : IDisposable
         }
 
         LogKey($"Cmd+Delete failed: {error}");
+        return false;
+    }
+
+    private bool TryHandleCommandInfo(Keys key, bool isKeyDown, bool isKeyUp)
+    {
+        if (key != Keys.I)
+        {
+            return false;
+        }
+
+        if (isKeyUp)
+        {
+            return _swallowedCommandInfoKeys.Remove(key);
+        }
+
+        if (!isKeyDown || !IsCommandShortcutModifierDown())
+        {
+            return false;
+        }
+
+        if (SendCommandInfoAction(out var error))
+        {
+            _swallowedCommandInfoKeys.Add(key);
+            LogKey("Cmd+I -> Alt+Enter");
+            return true;
+        }
+
+        LogKey($"Cmd+I failed: {error}");
         return false;
     }
 
@@ -442,6 +476,20 @@ public sealed class KeyboardRemapper : IDisposable
         try
         {
             return SendKeyPress((ushort)Keys.Delete, out error);
+        }
+        finally
+        {
+            RestoreActiveCommandControls(releasedControls);
+        }
+    }
+
+    private bool SendCommandInfoAction(out string error)
+    {
+        var releasedControls = ReleaseActiveCommandControls();
+
+        try
+        {
+            return SendChord((ushort)Keys.Menu, (ushort)Keys.Enter, out error);
         }
         finally
         {
@@ -684,6 +732,7 @@ public sealed class KeyboardRemapper : IDisposable
             or Keys.Space
             or Keys.Back
             or Keys.Delete
+            or Keys.I
             or Keys.VolumeMute
             or Keys.VolumeDown
             or Keys.VolumeUp
@@ -880,6 +929,7 @@ public sealed class KeyboardRemapper : IDisposable
         _swallowedFunctionRowKeys.Clear();
         _swallowedScreenshotKeys.Clear();
         _swallowedCommandDeleteKeys.Clear();
+        _swallowedCommandInfoKeys.Clear();
     }
 
     private void ReleaseCommandSide(Keys key)
