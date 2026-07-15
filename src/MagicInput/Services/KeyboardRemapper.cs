@@ -364,6 +364,7 @@ public sealed class KeyboardRemapper : IDisposable
         action = key switch
         {
             Keys.F1 => FunctionRowAction.Dictation,
+            Keys.F2 => FunctionRowAction.CodexAloud,
             Keys.F3 => FunctionRowAction.TaskView,
             Keys.F4 => FunctionRowAction.StartMenu,
             Keys.F5 => FunctionRowAction.PreviousWindow,
@@ -388,6 +389,7 @@ public sealed class KeyboardRemapper : IDisposable
             FunctionRowAction.TaskView => SendChord((ushort)Keys.LWin, (ushort)Keys.Tab, out error),
             FunctionRowAction.StartMenu => SendKeyPress((ushort)Keys.LWin, out error),
             FunctionRowAction.Dictation => SendChord((ushort)Keys.LWin, (ushort)Keys.H, out error),
+            FunctionRowAction.CodexAloud => SendChord([(ushort)Keys.ControlKey, (ushort)Keys.Menu], (ushort)Keys.S, out error),
             FunctionRowAction.ShowDesktop => SendChord((ushort)Keys.LWin, (ushort)Keys.D, out error),
             FunctionRowAction.MediaPreviousTrack => SendKeyPress(0xB1, out error),
             FunctionRowAction.MediaPlayPause => SendKeyPress(0xB3, out error),
@@ -413,6 +415,7 @@ public sealed class KeyboardRemapper : IDisposable
             FunctionRowAction.TaskView => "Win+Tab",
             FunctionRowAction.StartMenu => "Win",
             FunctionRowAction.Dictation => "Win+H",
+            FunctionRowAction.CodexAloud => "Codex Aloud (Ctrl+Alt+S)",
             FunctionRowAction.ShowDesktop => "Win+D",
             FunctionRowAction.MediaPreviousTrack => "previous track",
             FunctionRowAction.MediaPlayPause => "play/pause",
@@ -973,6 +976,7 @@ public sealed class KeyboardRemapper : IDisposable
         TaskView,
         StartMenu,
         Dictation,
+        CodexAloud,
         ShowDesktop,
         MediaPreviousTrack,
         MediaPlayPause,

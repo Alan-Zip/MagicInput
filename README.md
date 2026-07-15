@@ -152,12 +152,18 @@ Run key is absent, Magic Input will not start automatically after a restart.
 - Magic Keyboard detection and battery refresh.
 - Apple function row mapping:
   - `F1` -> dictation (`Win+H`)
+  - `F2` / Brightness+ -> speak selected text through Codex Aloud (`Ctrl+Alt+S`)
   - `F3` -> Task View (`Win+Tab`)
   - `F4` -> Start
   - `F5` -> previous focused window (`Alt+Tab`)
   - `F6` -> Show Desktop (`Win+D`)
   - `F7` through `F12` -> media previous, play/pause, next, mute, volume down,
     and volume up
+
+The `F2` mapping deliberately emits Codex Aloud's existing global
+`Ctrl+Alt+S` interface rather than depending on its implementation files.
+Codex Aloud must be enabled and its hidden listener must be running. The
+original `Ctrl+Alt+S` shortcut remains available as a fallback.
 - Modifier mapping:
   - physical Command -> Windows Control
   - physical Control -> Windows key
@@ -229,6 +235,12 @@ Remove-ItemProperty `
   -Name 'MagicInput' `
   -ErrorAction SilentlyContinue
 ```
+
+To disable all Apple function-row mappings temporarily, clear **Apple function
+row** on Magic Input's Keyboard page. To remove only the Codex Aloud `F2`
+mapping from source, revert the `Keys.F2` mapping in `KeyboardRemapper.cs` and
+republish with `scripts\install-magic-input.ps1 -SkipDriver`; the independent
+`Ctrl+Alt+S` shortcut will continue to work.
 
 To remove the published app files:
 
