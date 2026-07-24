@@ -16,5 +16,6 @@ public enum CornerTapAction
     StartMenu,
     TaskView,
     ShowDesktop,
-    PreviousWindow
+    PreviousWindow,
+    ControlAltG
 }

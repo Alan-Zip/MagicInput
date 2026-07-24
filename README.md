@@ -179,6 +179,7 @@ original `Ctrl+Alt+S` shortcut remains available as a fallback.
 - Configurable bottom-left trackpad tap, defaulting to Clipboard History
   (`Win+V`). This is additive user-mode handling and does not suppress
   Windows' normal tap-to-click event.
+- Fixed top-right trackpad tap for `Ctrl+Alt+G`.
 - Text-only Mac-to-PC clipboard handoff. Magic Input watches
   `%APPDATA%\MagicInput\clipboard-inbox` in the logged-in desktop session and
   imports atomically written `.clip` files into the real Windows clipboard.

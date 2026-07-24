@@ -16,7 +16,8 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
 
     private readonly TouchpadContactManager _contactManager;
     private readonly ThreeFingerDragRecognizer _dragRecognizer = new();
-    private readonly BottomLeftTapRecognizer _bottomLeftTapRecognizer = new();
+    private readonly CornerTapRecognizer _bottomLeftTapRecognizer = new(CornerTapLocation.BottomLeft, "bottom-left tap");
+    private readonly CornerTapRecognizer _topRightTapRecognizer = new(CornerTapLocation.TopRight, "top-right tap");
     private readonly System.Windows.Forms.Timer _dragReleaseTimer = new();
     private readonly System.Windows.Forms.Timer _tapReleaseTimer = new();
 
@@ -45,6 +46,8 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             _tapReleaseTimer.Stop();
             _bottomLeftTapRecognizer.CompletePending(_lastBounds);
             _bottomLeftTapRecognizer.Reset();
+            _topRightTapRecognizer.CompletePending(_lastBounds);
+            _topRightTapRecognizer.Reset();
         };
     }
 
@@ -58,8 +61,9 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         _bottomLeftTapAction = bottomLeftTapAction;
         _dragRecognizer.Enabled = threeFingerDragEnabled;
         _bottomLeftTapRecognizer.Configure(bottomLeftTapAction);
+        _topRightTapRecognizer.Configure(CornerTapAction.ControlAltG);
 
-        if (threeFingerDragEnabled || bottomLeftTapAction != CornerTapAction.Off)
+        if (threeFingerDragEnabled || bottomLeftTapAction != CornerTapAction.Off || _topRightTapRecognizer.IsEnabled)
         {
             Start();
             return;
@@ -126,6 +130,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         _tapReleaseTimer.Stop();
         _dragRecognizer.Release();
         _bottomLeftTapRecognizer.Reset();
+        _topRightTapRecognizer.Reset();
         _previousContacts = [];
         RawTouchpadInput.UnregisterInput();
         Status = "Touchpad gestures are off.";
@@ -156,6 +161,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         if (contacts.Count == 0)
         {
             _bottomLeftTapRecognizer.OnContacts(_previousContacts, [], bounds);
+            _topRightTapRecognizer.OnContacts(_previousContacts, [], bounds);
             _previousContacts = [];
             _dragReleaseTimer.Stop();
             _dragReleaseTimer.Start();
@@ -172,10 +178,12 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             _previousContacts = [];
             _dragRecognizer.ResetGestureTracking();
             _bottomLeftTapRecognizer.Reset();
+            _topRightTapRecognizer.Reset();
         }
 
         var currentContacts = contacts.ToArray();
         _bottomLeftTapRecognizer.OnContacts(_previousContacts, currentContacts, bounds);
+        _topRightTapRecognizer.OnContacts(_previousContacts, currentContacts, bounds);
         _dragRecognizer.OnContacts(_previousContacts, currentContacts, (int)elapsed);
         _previousContacts = currentContacts;
         _dragReleaseTimer.Start();
@@ -186,10 +194,10 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
     {
         return (_threeFingerDragEnabled, _bottomLeftTapAction != CornerTapAction.Off) switch
         {
-            (true, true) => "Three-finger drag and bottom-left tap are active.",
-            (true, false) => "Three-finger drag is active.",
-            (false, true) => "Bottom-left tap is active.",
-            _ => "Touchpad gestures are off."
+            (true, true) => "Three-finger drag and corner taps are active.",
+            (true, false) => "Three-finger drag and top-right tap are active.",
+            (false, true) => "Corner taps are active.",
+            _ => "Top-right tap is active."
         };
     }
 
@@ -432,7 +440,13 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         }
     }
 
-    private sealed class BottomLeftTapRecognizer
+    private enum CornerTapLocation
+    {
+        BottomLeft,
+        TopRight
+    }
+
+    private sealed class CornerTapRecognizer
     {
         private const float CornerWidthRatio = 0.24f;
         private const float CornerHeightRatio = 0.24f;
@@ -450,6 +464,17 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         private int _lastY;
         private long _startedAt;
         private long _lastTriggeredAt;
+
+        private readonly CornerTapLocation _location;
+        private readonly string _logName;
+
+        public CornerTapRecognizer(CornerTapLocation location, string logName)
+        {
+            _location = location;
+            _logName = logName;
+        }
+
+        public bool IsEnabled => _action != CornerTapAction.Off;
 
         public void Configure(CornerTapAction action)
         {
@@ -489,7 +514,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             if (!_tracking)
             {
                 _tracking = true;
-                _blocked = !bounds.IsBottomLeft(contact, CornerWidthRatio, CornerHeightRatio);
+                _blocked = !bounds.IsCorner(contact, _location, CornerWidthRatio, CornerHeightRatio);
                 _contactId = contact.ContactId;
                 _startX = contact.X;
                 _startY = contact.Y;
@@ -507,7 +532,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
 
             _lastX = contact.X;
             _lastY = contact.Y;
-            if (!bounds.IsBottomLeft(contact, CornerWidthRatio, CornerHeightRatio) || MovedTooFar(bounds))
+            if (!bounds.IsCorner(contact, _location, CornerWidthRatio, CornerHeightRatio) || MovedTooFar(bounds))
             {
                 _blocked = true;
             }
@@ -546,7 +571,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             if (KeyboardActionInput.Send(_action))
             {
                 _lastTriggeredAt = now;
-                Log($"bottom-left tap -> {DescribeAction(_action)}");
+                Log($"{_logName} -> {DescribeAction(_action)}");
             }
         }
 
@@ -568,6 +593,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
                 CornerTapAction.TaskView => "Win+Tab",
                 CornerTapAction.ShowDesktop => "Win+D",
                 CornerTapAction.PreviousWindow => "Alt+Tab",
+                CornerTapAction.ControlAltG => "Ctrl+Alt+G",
                 _ => "off"
             };
         }
@@ -591,7 +617,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
         public int Width => MaxX - MinX;
         public int Height => MaxY - MinY;
 
-        public bool IsBottomLeft(TouchpadContact contact, float widthRatio, float heightRatio)
+        public bool IsCorner(TouchpadContact contact, CornerTapLocation location, float widthRatio, float heightRatio)
         {
             if (!IsValid)
             {
@@ -599,8 +625,15 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
             }
 
             var leftLimit = MinX + Width * widthRatio;
+            var rightLimit = MaxX - Width * widthRatio;
+            var topLimit = MinY + Height * heightRatio;
             var bottomLimit = MaxY - Height * heightRatio;
-            return contact.X <= leftLimit && contact.Y >= bottomLimit;
+            return location switch
+            {
+                CornerTapLocation.BottomLeft => contact.X <= leftLimit && contact.Y >= bottomLimit,
+                CornerTapLocation.TopRight => contact.X >= rightLimit && contact.Y <= topLimit,
+                _ => false
+            };
         }
     }
 
@@ -1116,6 +1149,7 @@ public sealed class ThreeFingerDragService : NativeWindow, IDisposable
                 CornerTapAction.TaskView => SendChord([(ushort)Keys.LWin], (ushort)Keys.Tab),
                 CornerTapAction.ShowDesktop => SendChord([(ushort)Keys.LWin], (ushort)Keys.D),
                 CornerTapAction.PreviousWindow => SendChord([(ushort)Keys.Menu], (ushort)Keys.Tab),
+                CornerTapAction.ControlAltG => SendChord([(ushort)Keys.LControlKey, (ushort)Keys.Menu], (ushort)Keys.G),
                 _ => false
             };
         }
